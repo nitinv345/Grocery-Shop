@@ -412,7 +412,7 @@ app.post("/api/orders", verifyToken, async (req, res) => {
       { $set: { items: [], updatedAt: new Date() } }
     );
 
-    console.log(`✅ New order by ${req.user.email}: ₹${totalPrice}`);
+    console.log(`📦 [NEW ORDER] ID: ${order._id} | User: ${req.user.email} | Method: ${order.paymentMethod} | Total: ₹${totalPrice}`);
     res.status(201).json({ message: "Order placed", order });
   } catch (err) {
     console.error(err);
@@ -471,6 +471,7 @@ app.post("/api/orders/:id/pay", verifyToken, async (req, res) => {
     order.updatedAt      = new Date();
     await order.save();
 
+    console.log(`💳 [PAYMENT CONFIRMED] Order ID: ${order._id} | TransID: ${transactionId}`);
     res.json({ message: "Payment confirmed", order });
   } catch (err) {
     res.status(500).json({ error: "Server error" });

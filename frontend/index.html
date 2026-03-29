@@ -2551,61 +2551,112 @@ window.payOrder = (orderId, amount) => {
   openModal('payModal');
 };
 
-/* Re-implementing confirmPayment to handle two-step ONLINE flow */
+/* ═══════════════════════════════════════════════════
+   CONSOLIDATED: confirmPayment & _submitOrder
+   Handles both COD and ONLINE (QR) flows
+═══════════════════════════════════════════════════ */
 window.confirmPayment = async () => {
     const method = document.querySelector('input[name=payMethod]:checked')?.value;
     if (!method) return toast('⚠️ Please select a payment method');
 
+    // Calculate totals for consistency
+    const ids = Object.keys(window._cart);
+    const items = ids.map(id => {
+        const p = PRODUCTS.find(x => x.id == id);
+        return { productId: id, name: p?.n || id, price: p?.p || 0, quantity: window._cart[id] };
+    });
+    const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
+    const dlvFee = subtotal >= 199 ? 0 : 25;
+    const toPay = subtotal + dlvFee + 2;
+
     document.getElementById('paySelectView').style.display = 'none';
-    document.getElementById('payProcessingView').classList.add('on');
+    const proc = document.getElementById('payProcessingView');
+    const msg = document.getElementById('payProcessingMsg');
+    proc.classList.add('on');
 
     if (method === 'cod') {
-        document.getElementById('payProcessingMsg').textContent = 'Confirming your order...';
-        await _submitOrder('COD');
+        msg.textContent = 'Confirming your order...';
+        await _submitOrder('COD', { items, totalPrice: toPay });
     } else {
-        document.getElementById('payProcessingMsg').textContent = 'Generating payment QR...';
-        await _submitOrder('ONLINE');
+        msg.textContent = 'Generating payment QR...';
+        
+        // QR Generation Logic
+        const upiID   = "7447526042@upi";
+        const upiLink = `upi://pay?pa=${upiID}&pn=GloceryShop&am=${toPay}&cu=INR`;
+        const qrUrl   = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(upiLink)}`;
+        
+        document.getElementById('payQrImg').src = qrUrl;
+        const qrTextContainer = document.getElementById('payOnlineView').querySelector('div[style*="font-size:13px"]');
+        if (qrTextContainer) qrTextContainer.textContent = `UPI ID: ${upiID}`;
+
+        // Create order as "pending_payment"
+        await _submitOrder('ONLINE', { items, totalPrice: toPay });
     }
 };
 
-/* Verifies payment for ONLINE orders */
-window.verifyPaid = async () => {
-    if (!window._pendingOrderData) return;
+async function _submitOrder(method, orderData) {
+    try {
+        const res = await window.apiPost('/api/orders', {
+            ...orderData,
+            paymentMethod: method.toUpperCase(),
+            paymentStatus: 'pending'
+        });
+        
+        const orderId = res.order?._id || res.id;
+        console.log(`✅ [FRONTEND] Order Created: ${orderId} (${method.toUpperCase()})`);
 
-    // Show processing animation
+        if (method === 'ONLINE') {
+            window._pendingOrderData = orderData;
+            window._pendingOrderId = orderId;
+            document.getElementById('payProcessingView').classList.remove('on');
+            document.getElementById('payOnlineView').style.display = 'block';
+        } else {
+            // COD Finish
+            closeModal('payModal');
+            window._cart = {};
+            refreshAll();
+            pushCartAsync();
+            document.getElementById('succOrderId').textContent = orderId.slice(-8);
+            openModal('succModal');
+            toast(`🎉 Order Confirmed! (COD)`);
+        }
+    } catch (err) {
+        console.error("Order placement failed:", err);
+        toast('❌ Failed to place order. Try again.');
+        document.getElementById('paySelectView').style.display = 'block';
+        document.getElementById('payProcessingView').classList.remove('on');
+    }
+}
+
+window.verifyPaid = async () => {
+    if (!window._pendingOrderId) return;
+
     document.getElementById('payOnlineView').style.display = 'none';
     const proc = document.getElementById('payProcessingView');
-    const msg  = document.getElementById('payProcessingMsg');
+    const msg = document.getElementById('payProcessingMsg');
     proc.classList.add('on');
     msg.textContent = 'Verifying your payment...';
 
-    const { items, totalPrice } = window._pendingOrderData;
-
     try {
-        const data = await window.apiPost('/api/orders', { 
-            items, 
-            totalPrice, 
-            paymentMethod: 'ONLINE',
-            paymentStatus: 'paid',
+        const res = await window.apiPost(`/api/orders/${window._pendingOrderId}/pay`, {
             transactionId: 'UPI-' + Date.now().toString().slice(-6)
         });
-        
-        const orderId = data.order?._id || data.id || ('QC' + Date.now().toString().slice(-8));
 
-        // Finish up
+        console.log(`✅ [FRONTEND] Payment Confirmed for Order: ${window._pendingOrderId}`);
+        
         closeModal('payModal');
         window._cart = {};
         window._pendingOrderData = null;
+        window._pendingOrderId = null;
         refreshAll();
         pushCartAsync();
 
-        document.getElementById('succOrderId').textContent = orderId.slice(-8);
+        document.getElementById('succOrderId').textContent = res.order?._id.slice(-8);
         openModal('succModal');
-        toast(`✅ Order placed and payment confirmed!`);
-    } catch (e) {
-        console.error("Order creation failed after payment:", e);
-        toast('❌ Failed to confirm order. Please contact support.');
-        // Re-show QR view so they can try again or contact support
+        toast(`✅ Payment confirmed & order placed!`);
+    } catch (err) {
+        console.error("Payment verification failed:", err);
+        toast('❌ Payment verification failed. Please try again.');
         proc.classList.remove('on');
         document.getElementById('payOnlineView').style.display = 'block';
     }
@@ -2768,98 +2819,7 @@ window.selectPayMethod = method => {
   document.getElementById('payUpiSim').classList.toggle('on', method === 'online');
 };
  
-/* ═══════════════════════════════════════════════════
-   ADDED: confirmPayment — called when user clicks
-   "Confirm & Place Order" inside the payment modal
-═══════════════════════════════════════════════════ */
-window.confirmPayment = async () => {
-  const method = document.querySelector('input[name=payMethod]:checked')?.value;
 
-  if (!method) { toast('⚠️ Please select a payment method'); return; }
-
-  // Calculate totals
-  const ids       = Object.keys(window._cart);
-  const items     = ids.map(id => {
-    const p = PRODUCTS.find(x => x.id == id);
-    return { productId: id, name: p?.n || id, price: p?.p || 0, quantity: window._cart[id] };
-  });
-  const itemPrice = ids.reduce((s,id) => s + PRODUCTS.find(x=>x.id==id).p * window._cart[id], 0);
-  const dlvFee    = itemPrice >= 199 ? 0 : 25;
-  const toPay     = itemPrice + dlvFee + 2;
-
-  if (method === 'online') {
-    // 1. Store order data in memory
-    window._pendingOrderData = { items, totalPrice: toPay };
-
-    // 2. Generate UPI QR Code (Requirement: 7447526042)
-    const upiID   = "7447526042@upi";
-    const upiLink = `upi://pay?pa=${upiID}&pn=GroceryShop&am=${toPay}&cu=INR`;
-    const qrUrl   = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(upiLink)}`;
-    
-    // 3. Update QR View UI
-    document.getElementById('payQrImg').src = qrUrl;
-    // Update the UPI ID display in the modal
-    const qrTextContainer = document.getElementById('payOnlineView').querySelector('div[style*="font-size:13px"]');
-    if (qrTextContainer) qrTextContainer.textContent = `UPI ID: ${upiID}`;
-    
-    // 4. Switch View
-    document.getElementById('paySelectView').style.display = 'none';
-    document.getElementById('payOnlineView').style.display = 'block';
-    return;
-  }
-
-  // COD Path
-  document.getElementById('paySelectView').style.display = 'none';
-  const proc = document.getElementById('payProcessingView');
-  const msg  = document.getElementById('payProcessingMsg');
-  proc.classList.add('on');
-  msg.textContent = 'Confirming your order…';
-  await delay(1200);
-
-  // Actually save the order
-  await _submitOrder(method);
-};
-
-
-/* ── Tiny promise delay helper ── */
-function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
- 
-/* ═══════════════════════════════════════════════════
-   ADDED: _submitOrder — shared order finalisation
-   called by confirmPayment after payment is done
-═══════════════════════════════════════════════════ */
-async function _submitOrder(paymentMethod) {
-  const items = Object.entries(window._cart).map(([id, qty]) => {
-    const p = PRODUCTS.find(x => x.id == id);
-    return { productId: id, name: p?.n || id, price: p?.p || 0, quantity: qty };
-  });
-  const totalPrice = items.reduce((s,i) => s + i.price * i.quantity, 0)
-                   + (items.reduce((s,i)=>s+i.price*i.quantity,0) >= 199 ? 0 : 25)
-                   + 2;
- 
-  let orderId;
-  try {
-    const data = await window.apiPost('/api/orders', { items, totalPrice, paymentMethod });
-    orderId = data.order?._id || data.id || ('QC' + Date.now().toString().slice(-8));
-  } catch(err) {
-    console.error("Order submission failed:", err);
-    // Backend offline or error → generate local order ID for fallback
-    orderId = 'QC' + Date.now().toString().slice(-8);
-    if (err.status === 401) toast('⚠️ Session expired. Please login again.');
-  }
- 
-  // Finish up
-  closeModal('payModal');
-  window._cart = {};
-  refreshAll();
-  pushCartAsync();
- 
-  document.getElementById('succOrderId').textContent = orderId;
-  openModal('succModal');
- 
-  const methodLabel = paymentMethod === 'cod' ? 'Cash on Delivery' : 'Online Payment';
-  toast(`✅ Order placed via ${methodLabel}!`);
-}
  
 /* ═══════════════════════════════════════════════════
    ADDED: openProductDetail — opens the product detail
