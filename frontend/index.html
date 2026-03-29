@@ -1682,7 +1682,9 @@ const gProv = new GoogleAuthProvider();
    Change to your deployed server URL in production.
    e.g. "https://quickcart-api.onrender.com"
 ────────────────────────────────────────────── */
-const API = "http://localhost:5000";
+const API = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+  ? "http://localhost:5000"
+  : "https://grocery-shop-0406.onrender.com";
  
 /* ══════════════════════════════════════════════
    AUTH STATE LISTENER
@@ -1729,6 +1731,10 @@ async function apiPost(path, body) {
     headers,
     body: JSON.stringify(body)
   });
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw { status: res.status, message: errorText };
+  }
   return res.json();
 }
 async function apiGet(path) {
@@ -1736,6 +1742,10 @@ async function apiGet(path) {
   const headers = {};
   if (token) headers['Authorization'] = 'Bearer ' + token;
   const res = await fetch(API + path, { headers });
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw { status: res.status, message: errorText };
+  }
   return res.json();
 }
  
@@ -2032,6 +2042,7 @@ const PRODUCTS = [
    APP STATE
 ═══════════════════════════════════════════════════ */
 window._cart   = {};
+window._pendingOrderData = null;
 let _activeCat    = 'all';
 let _activeFilter = 'all';
 let _recentlyViewed = [];
@@ -2559,21 +2570,44 @@ window.confirmPayment = async () => {
 
 /* Verifies payment for ONLINE orders */
 window.verifyPaid = async () => {
-    const orderId = window._pendingOrderId;
-    if (!orderId) return;
+    if (!window._pendingOrderData) return;
+
+    // Show processing animation
+    document.getElementById('payOnlineView').style.display = 'none';
+    const proc = document.getElementById('payProcessingView');
+    const msg  = document.getElementById('payProcessingMsg');
+    proc.classList.add('on');
+    msg.textContent = 'Verifying your payment...';
+
+    const { items, totalPrice } = window._pendingOrderData;
 
     try {
-        const res = await apiPost(`/api/orders/${orderId}/pay`, { transactionId: 'TXN' + Date.now() });
-        if (res.error) throw new Error(res.error);
+        const data = await window.apiPost('/api/orders', { 
+            items, 
+            totalPrice, 
+            paymentMethod: 'ONLINE',
+            paymentStatus: 'paid',
+            transactionId: 'UPI-' + Date.now().toString().slice(-6)
+        });
+        
+        const orderId = data.order?._id || data.id || ('QC' + Date.now().toString().slice(-8));
 
-        toast('✅ Payment Successful!');
+        // Finish up
         closeModal('payModal');
+        window._cart = {};
+        window._pendingOrderData = null;
+        refreshAll();
+        pushCartAsync();
 
-        // Show Success Modal
         document.getElementById('succOrderId').textContent = orderId.slice(-8);
         openModal('succModal');
+        toast(`✅ Order placed and payment confirmed!`);
     } catch (e) {
-        toast('❌ Payment verification failed. Please try again.');
+        console.error("Order creation failed after payment:", e);
+        toast('❌ Failed to confirm order. Please contact support.');
+        // Re-show QR view so they can try again or contact support
+        proc.classList.remove('on');
+        document.getElementById('payOnlineView').style.display = 'block';
     }
 };
  
@@ -2740,52 +2774,53 @@ window.selectPayMethod = method => {
 ═══════════════════════════════════════════════════ */
 window.confirmPayment = async () => {
   const method = document.querySelector('input[name=payMethod]:checked')?.value;
- 
+
   if (!method) { toast('⚠️ Please select a payment method'); return; }
- 
+
+  // Calculate totals
+  const ids       = Object.keys(window._cart);
+  const items     = ids.map(id => {
+    const p = PRODUCTS.find(x => x.id == id);
+    return { productId: id, name: p?.n || id, price: p?.p || 0, quantity: window._cart[id] };
+  });
+  const itemPrice = ids.reduce((s,id) => s + PRODUCTS.find(x=>x.id==id).p * window._cart[id], 0);
+  const dlvFee    = itemPrice >= 199 ? 0 : 25;
+  const toPay     = itemPrice + dlvFee + 2;
+
   if (method === 'online') {
-    // Basic validation of simulated fields
-    const upiId  = document.getElementById('payUpiId').value.trim();
-    const expiry = document.getElementById('payExpiry').value.trim();
-    const cvv    = document.getElementById('payCvv').value.trim();
- 
-    // Accept either UPI format (word@word) or 16-digit card
-    const upiOk  = /^[\w.\-]+@[\w]+$/.test(upiId);
-    const cardOk = /^\d{13,19}$/.test(upiId.replace(/\s/g,''));
-    if (!upiOk && !cardOk) {
-      toast('❌ Enter a valid UPI ID or card number'); return;
-    }
-    if (!/^\d{2}\/\d{2,4}$/.test(expiry) && !upiOk) {
-      toast('❌ Enter a valid expiry date (MM/YY)'); return;
-    }
-    if (!upiOk && cvv.length < 3) {
-      toast('❌ Enter a valid CVV'); return;
-    }
+    // 1. Store order data in memory
+    window._pendingOrderData = { items, totalPrice: toPay };
+
+    // 2. Generate UPI QR Code (Requirement: 7447526042)
+    const upiID   = "7447526042@upi";
+    const upiLink = `upi://pay?pa=${upiID}&pn=GroceryShop&am=${toPay}&cu=INR`;
+    const qrUrl   = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(upiLink)}`;
+    
+    // 3. Update QR View UI
+    document.getElementById('payQrImg').src = qrUrl;
+    // Update the UPI ID display in the modal
+    const qrTextContainer = document.getElementById('payOnlineView').querySelector('div[style*="font-size:13px"]');
+    if (qrTextContainer) qrTextContainer.textContent = `UPI ID: ${upiID}`;
+    
+    // 4. Switch View
+    document.getElementById('paySelectView').style.display = 'none';
+    document.getElementById('payOnlineView').style.display = 'block';
+    return;
   }
- 
-  // Show processing animation
+
+  // COD Path
   document.getElementById('paySelectView').style.display = 'none';
   const proc = document.getElementById('payProcessingView');
   const msg  = document.getElementById('payProcessingMsg');
   proc.classList.add('on');
- 
-  if (method === 'cod') {
-    msg.textContent = 'Confirming your order…';
-    await delay(1200);
-  } else {
-    // Simulate payment gateway steps
-    msg.textContent = 'Connecting to payment gateway…';
-    await delay(900);
-    msg.textContent = 'Verifying payment details…';
-    await delay(800);
-    msg.textContent = 'Payment successful! Placing order…';
-    await delay(700);
-  }
- 
+  msg.textContent = 'Confirming your order…';
+  await delay(1200);
+
   // Actually save the order
   await _submitOrder(method);
 };
- 
+
+
 /* ── Tiny promise delay helper ── */
 function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
  

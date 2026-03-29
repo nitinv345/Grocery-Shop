@@ -388,7 +388,12 @@ app.post("/api/orders", verifyToken, async (req, res) => {
     }
 
     const isOnline = (paymentMethod || "COD").toUpperCase() === "ONLINE";
-    const orderStatus = isOnline ? "pending_payment" : "placed";
+    let orderStatus = isOnline ? "pending_payment" : "placed";
+    
+    // If payment is already completed (e.g. via QR flow), set status to placed
+    if (paymentStatus === "paid") {
+      orderStatus = "placed";
+    }
 
     const order = await Order.create({
       userId: req.user.uid,
@@ -421,6 +426,7 @@ app.post("/api/orders", verifyToken, async (req, res) => {
  */
 app.get("/api/orders", verifyToken, async (req, res) => {
   try {
+    console.log("Fetching orders for:", req.user.uid);
     const orders = await Order.find({ userId: req.user.uid })
       .sort({ createdAt: -1 })
       .limit(50);
@@ -525,34 +531,7 @@ app.post("/api/orders/:id/delivered", verifyToken, async (req, res) => {
   }
 });
 
-/**
- * POST /api/orders/:id/pay
- * handle payment AFTER delivery.
- */
-app.post("/api/orders/:id/pay", verifyToken, async (req, res) => {
-  try {
-    const { transactionId } = req.body;
-    const order = await Order.findById(req.params.id);
 
-    if (!order) return res.status(404).json({ error: "Order not found" });
-
-    if (order.orderStatus !== "delivered") {
-      return res.status(400).json({ error: "Payment allowed only after delivery" });
-    }
-
-    order.paymentStatus = "paid";
-    order.paymentDetails = {
-      transactionId,
-      paidAt: new Date()
-    };
-    order.updatedAt = new Date();
-    await order.save();
-
-    res.json({ message: "Payment successful", order });
-  } catch (err) {
-    res.status(500).json({ error: "Server error" });
-  }
-});
 
 /**
  * GET /api/qrcode
@@ -560,7 +539,7 @@ app.post("/api/orders/:id/pay", verifyToken, async (req, res) => {
  */
 app.get("/api/qrcode", verifyToken, async (req, res) => {
   const { amount } = req.query;
-  const upiId = "yourupi@bank"; // placeholder
+  const upiId = "7447526042@upi";
   const upiUrl = `upi://pay?pa=${upiId}&pn=GloceryShop&am=${amount}&cu=INR`;
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(upiUrl)}`;
   res.json({ qr: qrUrl, upi: upiId });

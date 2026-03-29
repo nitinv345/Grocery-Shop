@@ -36,8 +36,10 @@ const auth   = getAuth(app);
 const gProv  = new GoogleAuthProvider();
 
 // ── Backend base URL ──────────────────────────
-// Live URL on Render
-const API = "https://grocery-shop-0406.onrender.com";
+const API = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+  ? "http://localhost:5000"
+  : "https://grocery-shop-0406.onrender.com";
+
 window.API = API;
 window.apiGet = apiGet;
 window.apiPost = apiPost;
