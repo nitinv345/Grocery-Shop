@@ -31,14 +31,29 @@ app.use("/api/", limiter);
 
 // ─────────────────────────────────────────────
 //  FIREBASE ADMIN INIT
-//  Download serviceAccountKey.json from:
-//  Firebase Console → Project Settings → Service Accounts
 // ─────────────────────────────────────────────
-const serviceAccount = require("./serviceAccountKey.json");
+const requiredFirebaseVars = ["FIREBASE_PROJECT_ID", "FIREBASE_CLIENT_EMAIL", "FIREBASE_PRIVATE_KEY"];
+const missingVars = requiredFirebaseVars.filter(v => !process.env[v]);
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
+if (missingVars.length > 0) {
+  console.error(`❌ CRITICAL: Missing Firebase environment variables: ${missingVars.join(", ")}`);
+  process.exit(1);
+}
+
+try {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    }),
+  });
+  console.log("✅ Firebase Admin initialized securely via environment variables");
+} catch (error) {
+  console.error("❌ Firebase Admin initialization failed:", error.message);
+  process.exit(1);
+}
+
 
 // ─────────────────────────────────────────────
 //  MONGODB CONNECTION
@@ -112,6 +127,7 @@ const orderSchema = new mongoose.Schema({
   items:      [orderItemSchema],
   totalPrice: { type: Number, required: true },
   orderStatus: {
+    type: String,
     enum: ["pending_payment", "placed", "shipped", "delivered", "cancelled"],
     default: "placed"
   },
