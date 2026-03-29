@@ -2192,7 +2192,7 @@ function pushCartAsync() {
         .map(([productId, quantity]) => ({ productId, quantity }));
       try {
         const token = await window._auth.currentUser.getIdToken();
-        await fetch(`${API}/api/cart`, {
+        await fetch(`${window.API}/api/cart`, {
           method:'POST',
           headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
           body: JSON.stringify({ items })
@@ -2378,7 +2378,7 @@ window.showOrdersPage = async () => {
     `<div class="loader-row">⏳ Loading orders…</div>`;
   try {
     const token = await window._auth.currentUser.getIdToken();
-    const res   = await fetch(`${API}/api/orders`, {
+    const res   = await fetch(`${window.API}/api/orders`, {
       headers: { 'Authorization':'Bearer '+token }
     });
     const data = await res.json();
@@ -2705,7 +2705,7 @@ async function _submitOrder(paymentMethod) {
   let orderId;
   try {
     const token = await window._auth.currentUser.getIdToken();
-    const res   = await fetch('http://localhost:5000/api/orders', {
+    const res   = await fetch(`${window.API}/api/orders`, {
       method:  'POST',
       headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+token },
       body:    JSON.stringify({ items, totalPrice, paymentMethod })

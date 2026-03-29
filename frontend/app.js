@@ -36,11 +36,14 @@ const auth   = getAuth(app);
 const gProv  = new GoogleAuthProvider();
 
 // ── Backend base URL ──────────────────────────
-// Change to your deployed server URL in production
-// e.g. "https://quickcart-api.onrender.com"
-const API = "http://localhost:5000";
+// Live URL on Render
+const API = "https://grocery-shop-0406.onrender.com";
+window.API = API;
+window.apiGet = apiGet;
+window.apiPost = apiPost;
 
 // ─────────────────────────────────────────────
+
 //  AUTH STATE LISTENER
 //  Fires on every login / logout change
 // ─────────────────────────────────────────────
