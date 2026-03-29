@@ -2367,27 +2367,36 @@ window.showOrdersPage = async () => {
   document.getElementById('shopPage').style.display   = 'none';
   document.getElementById('ordersPage').classList.add('on');
   closeProfMenu();
- 
+
   if (!window._auth?.currentUser) {
     document.getElementById('ordersContent').innerHTML =
       `<div class="loader-row">🔒 Please <a onclick="openAuthModal('login')" style="color:var(--g);cursor:pointer;font-weight:700">login</a> to view your orders.</div>`;
     return;
   }
- 
+
   document.getElementById('ordersContent').innerHTML =
     `<div class="loader-row">⏳ Loading orders…</div>`;
+
   try {
-    const token = await window._auth.currentUser.getIdToken();
-    const res   = await fetch(`${window.API}/api/orders`, {
-      headers: { 'Authorization':'Bearer '+token }
-    });
-    const data = await res.json();
+    const data = await window.apiGet('/api/orders');
     renderOrdersList(data.orders || []);
-  } catch(e) {
+  } catch(err) {
+    console.error("Order fetch failed:", err);
+    let msg = "Could not load orders (backend offline)";
+    let ico = "📦";
+
+    if (err.status === 401) {
+      msg = "🔒 Session expired. Please login again.";
+      ico = "🔑";
+    } else if (err.status) {
+      msg = `Could not load orders (Error ${err.status})`;
+    }
+
     document.getElementById('ordersContent').innerHTML =
-      `<div class="loader-row" style="flex-direction:column;gap:4px">
-        <span style="font-size:32px">📦</span>
-        <span style="color:var(--t3)">Could not load orders (backend offline)</span>
+      `<div class="loader-row" style="flex-direction:column;gap:12px;text-align:center;padding:40px 20px">
+        <span style="font-size:42px">${ico}</span>
+        <span style="color:var(--t2);font-weight:600">${msg}</span>
+        <button class="btn-ghost" onclick="showOrdersPage()" style="margin-top:8px">Retry</button>
        </div>`;
   }
 };
@@ -2704,17 +2713,13 @@ async function _submitOrder(paymentMethod) {
  
   let orderId;
   try {
-    const token = await window._auth.currentUser.getIdToken();
-    const res   = await fetch(`${window.API}/api/orders`, {
-      method:  'POST',
-      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+token },
-      body:    JSON.stringify({ items, totalPrice, paymentMethod })
-    });
-    const data = await res.json();
-    orderId = data.order?._id || ('QC' + Date.now().toString().slice(-8));
-  } catch(e) {
-    // Backend offline → generate local order ID
+    const data = await window.apiPost('/api/orders', { items, totalPrice, paymentMethod });
+    orderId = data.order?._id || data.id || ('QC' + Date.now().toString().slice(-8));
+  } catch(err) {
+    console.error("Order submission failed:", err);
+    // Backend offline or error → generate local order ID for fallback
     orderId = 'QC' + Date.now().toString().slice(-8);
+    if (err.status === 401) toast('⚠️ Session expired. Please login again.');
   }
  
   // Finish up

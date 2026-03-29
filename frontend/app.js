@@ -95,13 +95,22 @@ async function apiPost(path, body = {}) {
   const headers = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = "Bearer " + token;
 
-  const res = await fetch(API + path, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  try {
+    const res = await fetch(API + path, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error(`API POST Error [${res.status}]:`, errorText);
+      throw { status: res.status, message: errorText };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("Fetch error in apiPost:", err);
+    throw err;
+  }
 }
 
 async function apiGet(path) {
@@ -109,10 +118,25 @@ async function apiGet(path) {
   const headers = {};
   if (token) headers["Authorization"] = "Bearer " + token;
 
-  const res = await fetch(API + path, { headers });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  try {
+    const res = await fetch(API + path, { headers });
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error(`API GET Error [${res.status}]:`, errorText);
+      throw { status: res.status, message: errorText };
+    }
+    return res.json();
+  } catch (err) {
+    console.error("Fetch error in apiGet:", err);
+    throw err;
+  }
 }
+
+// Expose to window for index.html
+window.apiGet = apiGet;
+window.apiPost = apiPost;
+window.API = API;
+
 
 // ─────────────────────────────────────────────
 //  SIGN UP (Email + Password)
