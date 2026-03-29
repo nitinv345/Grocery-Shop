@@ -188,10 +188,15 @@ async function optionalToken(req, res, next) {
 //  ROUTES
 // ═══════════════════════════════════════════════════════════
 
-// ── Health check ──────────────────────────────
-app.get("/", (req, res) => {
-  res.json({ status: "🚀 Glocery Shop API running", version: "1.0.0" });
-});
+// ── Health check (Supports GET and HEAD) ───────
+app.route("/")
+  .get((req, res) => {
+    res.json({ status: "API running", message: "Backend is live" });
+  })
+  .head((req, res) => {
+    res.status(200).end();
+  });
+
 
 // ─────────────────────────────────────────────
 //  USERS
